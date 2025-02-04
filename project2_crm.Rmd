@@ -14,7 +14,7 @@ setwd("C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Dir
 
 # Load in Required Packages
 ```{r Load in Required Packages, warning=FALSE, message=FALSE}
-################################ crm: for now I'm setting BiocManage lines to not run bc they're annoying
+################################ crm: for now I'm setting BiocManager lines to not run bc they're annoying
 #if (!requireNamespace("BiocManager", quietly = TRUE))
 #  install.packages("BiocManager")
 
