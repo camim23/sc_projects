@@ -1,0 +1,217 @@
+---
+title: "project1_crm"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    keep_tex: true
+---
+
+# Set Working Directory
+```{r Set Working Directory}
+setwd("C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work")
+```
+
+# Load in Required Packages
+```{r Load in Required Packages, warning=FALSE, message=FALSE}
+library(Seurat)
+library(dplyr)
+```
+
+# Load in Data
+```{r Load in Data}
+data <- Read10X(data.dir = "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/5k_mouse_brain_CNIK_3pv3_filtered_feature_bc_matrix/filtered_feature_bc_matrix")
+```
+
+# Make a Seurat Object
+```{r Make a Seurat Object}
+# We set the minimum number of features to 50 since the neurons have a lower RNA abundance than glial cells
+data_seurat <- CreateSeuratObject(counts = data, 
+                           project = "pbmc3k", 
+                           min.cells = 3, 
+                           min.features = 50)
+```
+
+# Make Column in Metadata for Mitochondrial Percentage
+```{r Mitochondrial Percentage}
+data_seurat[["percent.mt"]] <- PercentageFeatureSet(data_seurat, pattern = "^mt-")
+```
+
+# Violin Plots of Features, Counts, and Mitochondrial Percentage
+```{r Violin Plots, warning=FALSE}
+VlnPlot(data_seurat, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size=.2)
+# Can see that the violin plot for number of features has a bimodal distribution
+# This is due to the differences in RNA abundance between neurons and glial cells
+```
+
+# Make a Vector for Number of Features from Metadata
+```{r nFeature Vector }
+a = data_seurat[["nFeature_RNA"]]$nFeature_RNA
+```
+
+# Find 99th Percentile for Number of Features
+```{r 99th Percentile}
+cat(quantile(a, 0.99))
+```
+
+# Made a Subset of Seurat Object
+```{r QC Subset of Seurat Object}
+data_seurat <- subset(data_seurat, subset = nFeature_RNA > 50 & nFeature_RNA < 5139 & percent.mt < 5)
+# We want to have less than 5% mitochondria to exclude dead cells
+# We want cells with enough detected genes, so more than 50 and less than the 99% quantile we got earlier
+# We exclude above 99% quantile so we can exclude potential doublets
+
+dim(data_seurat)
+# This shows there are 22738 genes present and 5716 cells passed the quality control filter we set
+```
+
+# Normalized the Subset
+```{r Log Normalize Subset, message=FALSE}
+data_seurat <- NormalizeData(data_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+# Identify Variable Genes
+```{r Identify Feature Outliers, message=FALSE}
+data_seurat <- FindVariableFeatures(data_seurat, selection.method = "vst", nfeatures = 2000)
+# chose top 2000 most variable genes using a mean variability plot
+```
+
+# Make a Vector of Names of Variable Genes 
+```{r Vector of Variable Genes}
+all.genes <- rownames(data_seurat)
+# This vector should name the top 2000 variable genes identified
+```
+
+# Scale and Center Expression Values of Genes
+```{r Scale and Center Gene Expression, message=FALSE}
+data_seurat <- ScaleData(data_seurat, features = all.genes)
+```
+
+# PCA
+```{r PCA}
+# use VariableFeatures to select only the highly variable genes for PCA
+data_seurat <- RunPCA(data_seurat, features = VariableFeatures(object = data_seurat))
+
+# Plot PCA results
+DimPlot(data_seurat, reduction = "pca")
+```
+
+# Made an Elbow Plot
+```{r Elbow Plot}
+# Assess percentage standard deviation explained by different PCs
+ElbowPlot(data_seurat, ndims=50)
+```
+
+# JackStraw Analysis and Plot
+```{r JackStraw, warning=FALSE}
+# Pick number of PCs for a permutation-based test 
+data_seurat <- JackStraw(data_seurat, num.replicate = 20)
+# Did permutation test 20 times on PCs
+data_seurat <- ScoreJackStraw(data_seurat, dims = 1:20)
+# Assigns p-values to the PCs to identify PCs that actually explain the variance
+JackStrawPlot(data_seurat, dims = 1:20, ymax = .35)
+
+# QQplot for significance of each PC
+# Set y-axis to .35 so you can see separation of PCs in the JackStrawPlot
+# Dots above diagonal line show PCs that explain variance
+# The further away the PC curve is from standard distribution, the more that PC explains true variance
+```
+
+# Clustering and Visualization of tSNE/UMAP
+```{r Form Clusters, message=FALSE}
+# find nearest neighbors using the first 10 PCs
+data_seurat <- FindNeighbors(data_seurat, dims = 1:10) 
+
+# find clusters of cells
+data_seurat <- FindClusters(data_seurat, resolution = 0.5, verbose=FALSE)
+# set resolution at .5 to find "larger" clusters
+```
+
+# UMAP
+```{r UMAP, warning=FALSE, message=FALSE}
+# dims sets the number of PCs used for finding neighbors/clusters
+data_seurat_5 <- RunUMAP(data_seurat, dims = 1:5)
+# we think 10 PCs would give the best results for UMAP
+data_seurat <- RunUMAP(data_seurat, dims = 1:10)
+data_seurat_15 <- RunUMAP(data_seurat, dims = 1:15)
+data_seurat_20 <- RunUMAP(data_seurat, dims = 1:20)
+
+# Plot UMAP results with different number of PCs
+DimPlot(data_seurat_5, reduction = "umap", label=T)
+DimPlot(data_seurat, reduction = "umap", label=T)
+DimPlot(data_seurat_15, reduction = "umap", label=T)
+DimPlot(data_seurat_20, reduction = "umap", label=T)
+```
+
+# tSNE with Multiple Perplexities
+```{r tSNE}
+# perplexity controls size of neighborhood around each data point, should be between 5 and 50
+# perplexity should be n/100, there are 5716 cells so ideal perplexity is probably about 50
+# changed "perplecity" to "perplexity" in code
+
+data_seurat_5 <- RunTSNE(data_seurat, dims = 1:10, perplexity = 5)
+data_seurat_10 <- RunTSNE(data_seurat, dims = 1:10, perplexity = 10)
+data_seurat_20 <- RunTSNE(data_seurat, dims = 1:10, perplexity = 20)
+data_seurat_30 <- RunTSNE(data_seurat, dims = 1:10, perplexity = 30)
+data_seurat_40 <- RunTSNE(data_seurat, dims = 1:10, perplexity = 40)
+data_seurat_50 <- RunTSNE(data_seurat, dims = 1:10, perplexity = 50)
+
+DimPlot(data_seurat_5, reduction = "tsne",label=T)
+DimPlot(data_seurat_10, reduction = "tsne",label=T)
+DimPlot(data_seurat_20, reduction = "tsne",label=T)
+DimPlot(data_seurat_30, reduction = "tsne",label=T)
+DimPlot(data_seurat_40, reduction = "tsne",label=T)
+DimPlot(data_seurat_50, reduction = "tsne",label=T)
+```
+
+# Identify Marker Genes
+```{r Identify marker genes, message=FALSE}
+cluster1.markers <- FindMarkers(data_seurat, ident.1 = 1, min.pct = 0.25, verbose=FALSE)
+
+# see genes in each cluster
+head(cluster1.markers)
+
+# view  differentially marked genes in each class of the dataset 
+all.markers <- FindAllMarkers(data_seurat, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 1, verbose=FALSE)
+
+table_markers <- all.markers[, c("gene", "p_val", "cluster", "avg_log2FC", "pct.1", "pct.2", "p_val_adj")]
+
+# want the two genes with highest log2FC for each cluster
+table_markers <- table_markers %>%
+  group_by(cluster) %>%
+  slice_max(n=2, order_by = avg_log2FC)
+
+# top genes of each cluster
+knitr::kable(table_markers)  
+
+
+# list of top genes
+table_markers$gene
+```
+
+
+# Heatmap of Genes by Cluster
+```{r Heatmap, out.height="125%"}
+DoHeatmap(object = data_seurat, features=table_markers$gene, group.by="seurat_clusters", size=3)
+```
+
+# UMAP for Top Genes of Each Cluster
+```{r UMAP of Top Genes}
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[1:2],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[3:4],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[5:6],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[7:8],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[9:10],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[11:12],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[13:14],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[15:16],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[17:18],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[19:20],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[21:22],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[23:24],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[25:26],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[27:28],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+FeaturePlot(data_seurat,reduction="umap",features=table_markers$gene[29:30],order=F,cols=c("#d9d9d933","#bd0026"), ncol = 2, label=TRUE)
+```
