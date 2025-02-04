@@ -1,1 +1,1 @@
-# sc_project1
+# record of edits for single cell projects
