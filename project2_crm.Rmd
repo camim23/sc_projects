@@ -1,7 +1,5 @@
 ---
 title: "project2_crm"
-author: "crm"
-date: "2025-02-04"
 output:
   html_document:
     toc: true
@@ -37,7 +35,7 @@ set.seed(1234)
 ```
 
 # Load in Data
-```{r Load in Data}
+```{r Load in Data, message=FALSE}
 # Set File Paths
 path_h5 <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/ATAC_E18_Signac/atac_v1_E18_brain_fresh_5k_filtered_peak_bc_matrix.h5"
 path_metadata <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/ATAC_E18_Signac/atac_v1_E18_brain_fresh_5k_singlecell.csv"
@@ -48,7 +46,7 @@ c_mtx <- Read10X_h5(filename = path_h5)
 metadata <- read.csv(file = path_metadata, header = TRUE, row.names = 1)
 
 # Create Chromatin Assay
-chromatin_assay <- CreateChromatinAssay(counts = c_mtx, sep = c(":", "-"), genome = "mm10",fragments = path_fragment, min.cells = 1, min.features = 3)
+chromatin_assay <- CreateChromatinAssay(counts = c_mtx, sep = c(":", "-"), genome = "mm10",fragments = path_fragment, min.cells = 1, min.features = 3, verbose=FALSE)
 
 # Create Seurat Object
 S_obj <- CreateSeuratObject(counts = chromatin_assay, assay = "ATAC", project = "ATAC", meta.data = metadata)
@@ -59,7 +57,7 @@ rm(chromatin_assay, c_mtx, metadata, path_h5, path_metadata, path_fragment)
 
 # Annotate Genes 
 ```{r annotation, message=FALSE, warning=FALSE}
-annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Mmusculus.v79)  # Extract gene information
+annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Mmusculus.v79, verbose=FALSE)  # Extract gene information
 seqlevelsStyle(annotations) <- "UCSC"                            # Set UCSC format
 genome(annotations) <- "mm10"
 Annotation(S_obj) <- annotations                                 # Assign genes to peaks
@@ -73,12 +71,17 @@ rm(annotations)
 ```{r quality_control, warning=FALSE}
 # Compute nucleosome signal
 S_obj <- NucleosomeSignal(object = S_obj)
+# make two groups with one for more than 4 nucleosome signals and the other for 4 or less nucleosome signals
 S_obj$nuc_group <- ifelse(S_obj$nucleosome_signal > 4, "NS > 4", "NS <= 4")
+########################## crm: added the cat line, need to clean up so it explains what table() is showing
+cat("Number of cells")
 table(S_obj$nuc_group)
+
 
 # Plot fragment distribution
 options(repr.plot.width=10, repr.plot.height=4, repr.plot.res=200)
-FragmentHistogram(object = S_obj, group.by = "nuc_group", region = "chr1-1-10000000")
+############################ crm: added title and text size for it, need to clean up title
+FragmentHistogram(object = S_obj, group.by = "nuc_group", region = "chr1-1-10000000") + ggtitle("Distribution of fragments by nucleosome signal count") & theme(plot.title = element_text(size=12))
 ```
 
 # TSS Enrichment Score
@@ -86,6 +89,8 @@ FragmentHistogram(object = S_obj, group.by = "nuc_group", region = "chr1-1-10000
 # Compute TSS enrichment score (fast mode for speed)
 S_obj <- TSSEnrichment(S_obj, fast = TRUE, verbose = FALSE)
 S_obj$high.tss <- ifelse(S_obj$TSS.enrichment > 2, "High", "Low")
+######################## crm: added title with cat, needs to be cleaned up
+cat("Number of genes with high or low enrichment scores")
 table(S_obj$high.tss)
 
 # Compute full TSS enrichment for plotting
@@ -124,14 +129,10 @@ S_obj <- RunSVD(object = S_obj)
 
 # Plot LSI reduction
 options(repr.plot.width=10, repr.plot.height=4, repr.plot.res=200)
-# DimPlot(S_obj, reduction = "lsi", dims = c(2, 3)) | DepthCor(S_obj)
-############################## crm: separated these 2 plots so I could change title of DepthCor plot so it's legible, still plotted them together at the end
-p1 <- DimPlot(S_obj, reduction = "lsi", dims = c(2, 3))
-p2 <- DepthCor(S_obj) & theme(plot.title = element_text(size=6))
-p1 | p2
-rm(p1, p2)
+DimPlot(S_obj, reduction = "lsi", dims = c(2, 3)) | DepthCor(S_obj)
+############################## crm: changed title of DepthCor plot so it's legible, still plotted together
+DimPlot(S_obj, reduction = "lsi", dims = c(2, 3)) | DepthCor(S_obj) & theme(plot.title = element_text(size=6))
 ```
-
 
 # Clustering and UMAP
 ```{r Clustering and UMAP, warning=FALSE, message=FALSE}
@@ -140,22 +141,22 @@ S_obj <- FindNeighbors(object = S_obj, reduction = "lsi", dims = 2:30)
 ############################### why 2 to 30 for dims?
 
 # Cluster cells
-S_obj <- FindClusters(object = S_obj, algorithm = 3, resolution = 0.4)
+S_obj <- FindClusters(object = S_obj, algorithm = 3, resolution = 0.4, verbose=FALSE)
 
 # Run UMAP
-S_obj <- RunUMAP(object = S_obj, reduction = "lsi", dims = 2:30)
+S_obj <- RunUMAP(object = S_obj, reduction = "lsi", dims = 2:30, verbose=FALSE)
 
 # Plot UMAP
 options(repr.plot.width=6, repr.plot.height=6, repr.plot.res=200)
 DimPlot(object = S_obj, label = TRUE) + NoLegend()
+################### crm: do we not want the legend of the cluster numbers?
 ```
 
 
 # Differential Accessibility Analysis
 ```{r Differential Accessibility Analysis}
 # Find differentially accessible peaks
-da_peaks <- FindMarkers(object = S_obj, ident.1 = 1, test.use = "LR",
-                        min.pct = 0.4, latent.vars = "peak_region_fragments")
+da_peaks <- FindMarkers(object = S_obj, ident.1 = 1, test.use = "LR", min.pct = 0.4, latent.vars = "peak_region_fragments", verbose=FALSE)
 # head(da_peaks)
 knitr::kable(head(da_peaks))
 ###################################### crm: think knitr is better for showing heads of results (shows all rows)
@@ -166,6 +167,9 @@ Genes_clus_1 <- ClosestFeature(S_obj, Peaks_clus_1)
 #head(Genes_clus_1)
 knitr::kable(head(Genes_clus_1))
 ###################################### crm: think knitr is better for showing heads of results (shows all rows)
+
+# Clean up memory
+rm(da_peaks, Genes_clus_1, Peaks_clus_1)
 ```
 
 # Session Info
