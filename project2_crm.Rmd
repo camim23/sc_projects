@@ -15,7 +15,7 @@ setwd("C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Dir
 # Load in Required Packages
 ```{r Load in Required Packages, warning=FALSE, message=FALSE}
 ################################ crm: for now I'm setting BiocManager lines to not run bc they're annoying
-#if (!requireNamespace("BiocManager", quietly = TRUE))
+
 #  install.packages("BiocManager")
 
 # Install the necessary packages
@@ -38,9 +38,11 @@ set.seed(1234)
 # Load in Data
 ```{r Load in Data, message=FALSE}
 # Set File Paths
-path_h5 <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/ATAC_E18_Signac/atac_v1_E18_brain_fresh_5k_filtered_peak_bc_matrix.h5"
-path_metadata <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/ATAC_E18_Signac/atac_v1_E18_brain_fresh_5k_singlecell.csv"
-path_fragment <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/ATAC_E18_Signac/atac_v1_E18_brain_fresh_5k_fragments.tsv.gz"
+path_h5 <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/Project2 ATAC data/atac_v1_adult_brain_fresh_5k_filtered_peak_bc_matrix.h5"
+path_metadata <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/Project2 ATAC data/atac_v1_adult_brain_fresh_5k_singlecell.csv"
+path_fragment <- "C:/Users/camil/OneDrive - Baylor College of Medicine/Desktop/R Work/R Directory/BCM Work/Project2 ATAC data/atac_v1_adult_brain_fresh_5k_fragments.tsv.gz"
+# need h5 (10x results), metadata (.csv), and matrix
+
 
 # Import Data
 c_mtx <- Read10X_h5(filename = path_h5)
@@ -62,15 +64,15 @@ annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Mmusculus.v79, verbose=FALSE)  
 seqlevelsStyle(annotations) <- "UCSC"                            # Set UCSC format
 genome(annotations) <- "mm10"
 Annotation(S_obj) <- annotations                                 # Assign genes to peaks
+    # assign annotations to the genes in our s_obj
 
-########################## is this for sure annotating genes? what is this annotating?
 # Clean up memory
 rm(annotations)
 ```
 
 # Quality Control
 ```{r quality_control, warning=FALSE}
-# Compute nucleosome signal
+# Compute nucleosome signal (which dna fragments may contain nucleosomes?)
 S_obj <- NucleosomeSignal(object = S_obj)
 # make two groups with one for more than 4 nucleosome signals and the other for 4 or less nucleosome signals
 S_obj$nuc_group <- ifelse(S_obj$nucleosome_signal > 4, "NS > 4", "NS <= 4")
@@ -83,6 +85,8 @@ table(S_obj$nuc_group)
 options(repr.plot.width=10, repr.plot.height=4, repr.plot.res=200)
 ############################ crm: added title and text size for it, need to clean up title
 FragmentHistogram(object = S_obj, group.by = "nuc_group", region = "chr1-1-10000000") + ggtitle("Distribution of fragments by nucleosome signal count") & theme(plot.title = element_text(size=12))
+# under 4 = less signal from nucleosome
+# if we see multiple peaks in dataset, means libraries look good **
 ```
 
 # TSS Enrichment Score
@@ -100,6 +104,9 @@ S_obj$high.tss <- ifelse(S_obj$TSS.enrichment > 2, "High", "Low")
 
 options(repr.plot.width=6, repr.plot.height=3, repr.plot.res=200)
 TSSPlot(S_obj, group.by = "high.tss") + NoLegend()
+
+# number of reads for open chromatin reads is enriched in high regions **
+# what does that mean?
 ```
 
 # Violin Plots for Quality Control
@@ -108,10 +115,18 @@ TSSPlot(S_obj, group.by = "high.tss") + NoLegend()
 S_obj$pct_reads_in_peaks <- S_obj$peak_region_fragments / S_obj$passed_filters * 100
 S_obj$blacklist_ratio    <- S_obj$blacklist_region_fragments / S_obj$peak_region_fragments
 
+# he said: have you processed reads enough to have a good number of reads/peak? for pct_reads
+# blacklist looks for regions that have repeated reads (might be a mistake), tells you how many of your reads are in blacklisted region
+
+
 # Plot QC metrics
 options(repr.plot.width=12, repr.plot.height=4, repr.plot.res=200)
 VlnPlot(object = S_obj, features = c("pct_reads_in_peaks", "peak_region_fragments", "blacklist_ratio", "nucleosome_signal"), pt.size = 0.01, ncol = 4, combine=TRUE) & theme(plot.title = element_text(size=10, face="bold"))
 ########################################### crm: used ggplot2 theme function to change text of headers so the plot is legible
+
+# in practice data: we can see 60 reads per peak, which is good
+# number of reads per peak region, which is somewhere between 10 to 20k **
+# can see most of the reads aren't in blacklist regions and are not containing nucleosome signals
 ```
 
 # Filter Seurat Object
@@ -119,33 +134,45 @@ VlnPlot(object = S_obj, features = c("pct_reads_in_peaks", "peak_region_fragment
 # Apply filtering
 S_obj <- subset(S_obj, subset = peak_region_fragments > 3000 & peak_region_fragments < 50000 & pct_reads_in_peaks > 40 & blacklist_ratio < 0.025 & nucleosome_signal < 4)
 #################################### clean up title
+
+# chose peak_region_fragments from 3k-50k
+# want at least 40 reads per peak
+# want only reads that are not primarily in blacklist regions
+# don't want reads that have lots of nucleosome signals
 ```
 
 # Dimension Reduction
 ```{r Dimension Reduction, message=FALSE, warning=FALSE}
 # TF-IDF normalization and SVD
 S_obj <- RunTFIDF(S_obj)
+# tfidf instead of PCA normalization
 S_obj <- FindTopFeatures(S_obj, min.cutoff = "q0")
+# identify top variable features (specifically peaks)
 S_obj <- RunSVD(object = S_obj)
+# then run SVD to ***
 
 # Plot LSI reduction
 options(repr.plot.width=10, repr.plot.height=4, repr.plot.res=200)
 DimPlot(S_obj, reduction = "lsi", dims = c(2, 3)) | DepthCor(S_obj)
 ############################## crm: changed title of DepthCor plot so it's legible, still plotted together
 DimPlot(S_obj, reduction = "lsi", dims = c(2, 3)) | DepthCor(S_obj) & theme(plot.title = element_text(size=6))
+# how well does dimension reduction work on our data set?
 ```
 
 # Clustering and UMAP
 ```{r Clustering and UMAP, warning=FALSE, message=FALSE}
 # Compute nearest neighbors
 S_obj <- FindNeighbors(object = S_obj, reduction = "lsi", dims = 2:30)
-############################### why 2 to 30 for dims?
+############################### 2 to 30 for dim because we are running LSI dimension reduction
+# first PC is highly biased by single cell depth, so we will be excluding first PC
+# LSI is SVD applied to IDF matrix
 
 # Cluster cells
 S_obj <- FindClusters(object = S_obj, algorithm = 3, resolution = 0.4, verbose=FALSE)
 
 # Run UMAP
 S_obj <- RunUMAP(object = S_obj, reduction = "lsi", dims = 2:30, verbose=FALSE)
+############################### 2 to 30 for dim because we are running LSI dimension reduction
 
 # Plot UMAP
 options(repr.plot.width=6, repr.plot.height=6, repr.plot.res=200)
@@ -156,11 +183,14 @@ DimPlot(object = S_obj, label = TRUE) + NoLegend()
 
 # Differential Accessibility Analysis
 ```{r Differential Accessibility Analysis}
-# Find differentially accessible peaks
+# Find differentially accessible peaks (open/closed regions)
 da_peaks <- FindMarkers(object = S_obj, ident.1 = 1, test.use = "LR", min.pct = 0.4, latent.vars = "peak_region_fragments", verbose=FALSE)
 # head(da_peaks)
 knitr::kable(head(da_peaks))
 ###################################### crm: think knitr is better for showing heads of results (shows all rows)
+# ident.1 = looking at the DA peaks only in cell cluster 1
+# results of data frame tells you where these peaks are
+
 
 # Identify genes near differentially accessible peaks
 Peaks_clus_1 <- rownames(da_peaks[da_peaks$avg_log2FC > 1.6, ])
@@ -168,6 +198,8 @@ Genes_clus_1 <- ClosestFeature(S_obj, Peaks_clus_1)
 #head(Genes_clus_1)
 knitr::kable(head(Genes_clus_1))
 ###################################### crm: think knitr is better for showing heads of results (shows all rows)
+# we want to know what genes are near these DA peaks we identified 
+# also tells you function of these genes
 
 # Clean up memory
 rm(da_peaks, Genes_clus_1, Peaks_clus_1)
